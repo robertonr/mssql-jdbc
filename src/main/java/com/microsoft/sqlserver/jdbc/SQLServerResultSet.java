@@ -793,7 +793,7 @@ public class SQLServerResultSet implements ISQLServerResultSet, java.io.Serializ
         checkClosed();
 
         // From JDBC spec:
-        // Throws SQLException if (1) there is no curent row or (2)
+        // Throws SQLException if (1) there is no current row or (2)
         // the type of this ResultSet object is TYPE_FORWARD_ONLY.
         verifyResultSetIsScrollable();
         verifyResultSetHasCurrentRow();
@@ -1056,6 +1056,12 @@ public class SQLServerResultSet implements ISQLServerResultSet, java.io.Serializ
         // Otherwise, we have reached the end of the result set
         if (UNKNOWN_ROW_COUNT == rowCount)
             rowCount = currentRow;
+
+        // Read SQL Warnings at the end of ResultSet
+        if (stmt.resultsReader().peekTokenType() == TDS.TDS_MSG) {
+            stmt.startResults();
+            stmt.getNextResult(false);
+        }
 
         currentRow = AFTER_LAST_ROW;
         loggerExternal.exiting(getClassNameLogging(), "next", false);
@@ -2375,16 +2381,15 @@ public class SQLServerResultSet implements ISQLServerResultSet, java.io.Serializ
             returnValue = getTime(columnIndex);
         } else if (type == java.sql.Timestamp.class) {
             returnValue = getTimestamp(columnIndex);
-        } else if (type == java.time.LocalDateTime.class 
-                || type == java.time.LocalDate.class 
+        } else if (type == java.time.LocalDateTime.class || type == java.time.LocalDate.class
                 || type == java.time.LocalTime.class) {
             java.sql.Timestamp ts = getTimestamp(columnIndex,
                     Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")));
             if (ts == null) {
                 returnValue = null;
             } else {
-                java.time.LocalDateTime ldt = java.time.LocalDateTime
-                        .ofInstant(ts.toInstant(), java.time.ZoneId.of("UTC")); 
+                java.time.LocalDateTime ldt = java.time.LocalDateTime.ofInstant(ts.toInstant(),
+                        java.time.ZoneId.of("UTC"));
                 if (type == java.time.LocalDateTime.class) {
                     returnValue = ldt;
                 } else if (type == java.time.LocalDate.class) {

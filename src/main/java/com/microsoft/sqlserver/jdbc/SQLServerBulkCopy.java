@@ -1559,22 +1559,6 @@ public class SQLServerBulkCopy implements java.lang.AutoCloseable, java.io.Seria
             } finally {
                 tdsWriter = command.getTDSWriter();
             }
-        } catch (SQLServerException ex) {
-            if (null == tdsWriter) {
-                tdsWriter = command.getTDSWriter();
-            }
-
-            // Close the TDS packet before handling the exception
-            writePacketDataDone(tdsWriter);
-
-            // Send Attention packet to interrupt a complete request that was already sent to the server
-            command.startRequest(TDS.PKT_CANCEL_REQ);
-
-            TDSParser.parse(command.startResponse(), command.getLogContext());
-            command.interrupt(ex.getMessage());
-            command.onRequestComplete();
-
-            throw ex;
         } finally {
             if (null == tdsWriter) {
                 tdsWriter = command.getTDSWriter();
@@ -1716,9 +1700,11 @@ public class SQLServerBulkCopy implements java.lang.AutoCloseable, java.io.Seria
                     SQLServerException.getErrString("R_invalidDestinationTable"), null, false);
         }
 
+        String escapedDestinationTableName = Util.escapeSingleQuotes(destinationTableName);
+
         SQLServerResultSet rs = null;
-        SQLServerResultSet rsMoreMetaData = null;
         SQLServerStatement stmt = null;
+        String metaDataQuery = null;
 
         try {
             if (null != destinationTableMetadata) {
@@ -1728,8 +1714,8 @@ public class SQLServerBulkCopy implements java.lang.AutoCloseable, java.io.Seria
                         ResultSet.CONCUR_READ_ONLY, connection.getHoldability(), stmtColumnEncriptionSetting);
 
                 // Get destination metadata
-                rs = stmt.executeQueryInternal(
-                        "sp_executesql N'SET FMTONLY ON SELECT * FROM " + destinationTableName + " '");
+                rs = stmt.executeQueryInternal("sp_executesql N'SET FMTONLY ON SELECT * FROM "
+                        + escapedDestinationTableName + " '");
             }
 
             destColumnCount = rs.getMetaData().getColumnCount();
@@ -1737,27 +1723,26 @@ public class SQLServerBulkCopy implements java.lang.AutoCloseable, java.io.Seria
             destCekTable = rs.getCekTable();
 
             if (!connection.getServerSupportsColumnEncryption()) {
-                // SQL server prior to 2016 does not support encryption_type
-                rsMoreMetaData = ((SQLServerStatement) connection.createStatement())
-                        .executeQueryInternal("select collation_name from sys.columns where " + "object_id=OBJECT_ID('"
-                                + destinationTableName + "') " + "order by column_id ASC");
+                metaDataQuery = "select collation_name from sys.columns where " + "object_id=OBJECT_ID('"
+                        + escapedDestinationTableName + "') " + "order by column_id ASC";
             } else {
-                rsMoreMetaData = ((SQLServerStatement) connection.createStatement())
-                        .executeQueryInternal("select collation_name, encryption_type from sys.columns where "
-                                + "object_id=OBJECT_ID('" + destinationTableName + "') " + "order by column_id ASC");
+                metaDataQuery = "select collation_name, encryption_type from sys.columns where "
+                        + "object_id=OBJECT_ID('" + escapedDestinationTableName + "') " + "order by column_id ASC";
             }
-            for (int i = 1; i <= destColumnCount; ++i) {
-                if (rsMoreMetaData.next()) {
-                    if (!connection.getServerSupportsColumnEncryption()) {
+
+            try (SQLServerStatement statementMoreMetadata = (SQLServerStatement) connection.createStatement();
+                    SQLServerResultSet rsMoreMetaData = statementMoreMetadata.executeQueryInternal(metaDataQuery)) {
+                for (int i = 1; i <= destColumnCount; ++i) {
+                    if (rsMoreMetaData.next()) {
+                        String bulkCopyEncryptionType = null;
+                        if (connection.getServerSupportsColumnEncryption()) {
+                            bulkCopyEncryptionType = rsMoreMetaData.getString("encryption_type");
+                        }
                         destColumnMetadata.put(i, new BulkColumnMetaData(rs.getColumn(i),
-                                rsMoreMetaData.getString("collation_name"), null));
+                                rsMoreMetaData.getString("collation_name"), bulkCopyEncryptionType));
                     } else {
-                        destColumnMetadata.put(i,
-                                new BulkColumnMetaData(rs.getColumn(i), rsMoreMetaData.getString("collation_name"),
-                                        rsMoreMetaData.getString("encryption_type")));
+                        destColumnMetadata.put(i, new BulkColumnMetaData(rs.getColumn(i)));
                     }
-                } else {
-                    destColumnMetadata.put(i, new BulkColumnMetaData(rs.getColumn(i)));
                 }
             }
         } catch (SQLException e) {
@@ -1768,8 +1753,6 @@ public class SQLServerBulkCopy implements java.lang.AutoCloseable, java.io.Seria
                 rs.close();
             if (null != stmt)
                 stmt.close();
-            if (null != rsMoreMetaData)
-                rsMoreMetaData.close();
         }
     }
 

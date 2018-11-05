@@ -19,6 +19,7 @@ import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.sql.Blob;
 import java.sql.Clob;
 import java.sql.SQLException;
@@ -1083,8 +1084,16 @@ final class DTV {
 
         void execute(DTV dtv, BigDecimal bigDecimalValue) throws SQLServerException {
             if (DDC.exceedsMaxRPCDecimalPrecisionOrScale(bigDecimalValue)) {
-                String strValue = bigDecimalValue.toString();
-                tdsWriter.writeRPCStringUnicode(name, strValue, isOutParam, collation);
+                if (JDBCType.DECIMAL == dtv.getJdbcType() || JDBCType.NUMERIC == dtv.getJdbcType()) {
+                    // Throw exception for DECIMAL and NUMERIC Datatypes
+                    MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRangeSQLType"));
+                    Object[] msgArgs = {dtv.getJdbcType()};
+                    throw new SQLServerException(form.format(msgArgs), SQLState.NUMERIC_DATA_OUT_OF_RANGE,
+                            DriverError.NOT_SET, null);
+                } else {
+                    String strValue = bigDecimalValue.toString();
+                    tdsWriter.writeRPCStringUnicode(name, strValue, isOutParam, collation);
+                }
             } else {
                 tdsWriter.writeRPCBigDecimal(name, bigDecimalValue, outScale, isOutParam);
             }
@@ -1758,7 +1767,7 @@ final class DTV {
                                             SQLServerException.getErrString("R_valueOutOfRange"));
                                     Object[] msgArgs = {cryptoMeta.getBaseTypeInfo().getSSTypeName()};
                                     throw new SQLServerException(form.format(msgArgs),
-                                            SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW, DriverError.NOT_SET, null);
+                                            SQLState.NUMERIC_DATA_OUT_OF_RANGE, DriverError.NOT_SET, null);
                                 }
                             } else {
                                 // if the precision that user provides is smaller than the precision of the actual
@@ -1772,7 +1781,7 @@ final class DTV {
                                             SQLServerException.getErrString("R_valueOutOfRange"));
                                     Object[] msgArgs = {SSType.DECIMAL};
                                     throw new SQLServerException(form.format(msgArgs),
-                                            SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW, DriverError.NOT_SET, null);
+                                            SQLState.NUMERIC_DATA_OUT_OF_RANGE, DriverError.NOT_SET, null);
                                 }
                             }
 
@@ -2185,11 +2194,7 @@ final class AppDTVImpl extends DTVImpl {
             // If the stream is to be sent as Unicode, then assume it's an ASCII stream
             if (JDBCType.NCHAR == jdbcType || JDBCType.NVARCHAR == jdbcType || JDBCType.LONGNVARCHAR == jdbcType) {
                 Reader readerValue = null;
-                try {
-                    readerValue = new InputStreamReader(inputStreamValue, "US-ASCII");
-                } catch (UnsupportedEncodingException ex) {
-                    throw new SQLServerException(ex.getMessage(), null, 0, ex);
-                }
+                readerValue = new InputStreamReader(inputStreamValue, StandardCharsets.US_ASCII);
 
                 dtv.setValue(readerValue, JavaType.READER);
 

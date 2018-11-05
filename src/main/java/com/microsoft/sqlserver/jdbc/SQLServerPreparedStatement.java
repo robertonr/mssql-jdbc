@@ -389,7 +389,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      *        True if renewing parameter definition, False otherwise
      * @throws SQLServerException
      *         when an error occurs.
-     * @return the required data type defintions.
+     * @return the required data type definitions.
      */
     private String buildParamTypeDefinitions(Parameter[] params, boolean renewDefinition) throws SQLServerException {
         StringBuilder sb = new StringBuilder();
@@ -543,7 +543,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         if ((Util.shouldHonorAEForParameters(stmtColumnEncriptionSetting, connection)) && (0 < inOutParam.length)
                 && !isInternalEncryptionQuery) {
 
-            // retrieve paramater encryption metadata if they are not retrieved yet
+            // retrieve parameter encryption metadata if they are not retrieved yet
             if (!encryptionMetadataIsRetrieved) {
                 getParameterEncryptionMetadata(inOutParam);
                 encryptionMetadataIsRetrieved = true;
@@ -575,7 +575,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
                 ensureExecuteResultsReader(command.startResponse(getIsResponseBufferingAdaptive()));
                 startResults();
-                getNextResult();
+                getNextResult(true);
             } catch (SQLException e) {
                 if (retryBasedOnFailedReuseOfCachedHandle(e, attempt, needsPrepare, false))
                     continue;
@@ -1101,7 +1101,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      *        The index of the parameter to set starting at 1.
      * @return A reference the to Parameter object created or referenced.
      * @exception SQLServerException
-     *            The index specified was outside the number of paramters for the statement.
+     *            The index specified was outside the number of parameters for the statement.
      */
     final Parameter setterGetParam(int index) throws SQLServerException {
         if (index < 1 || index > inOutParam.length) {
@@ -1178,33 +1178,33 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
     }
 
     @Override
-    public final void setBigDecimal(int paramterIndex, BigDecimal x) throws SQLServerException {
+    public final void setBigDecimal(int parameterIndex, BigDecimal x) throws SQLServerException {
         if (loggerExternal.isLoggable(java.util.logging.Level.FINER))
-            loggerExternal.entering(getClassNameLogging(), "setBigDecimal", new Object[] {paramterIndex, x});
+            loggerExternal.entering(getClassNameLogging(), "setBigDecimal", new Object[] {parameterIndex, x});
         checkClosed();
-        setValue(paramterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, false);
+        setValue(parameterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, false);
         loggerExternal.exiting(getClassNameLogging(), "setBigDecimal");
     }
 
     @Override
-    public final void setBigDecimal(int paramterIndex, BigDecimal x, int precision,
+    public final void setBigDecimal(int parameterIndex, BigDecimal x, int precision,
             int scale) throws SQLServerException {
         if (loggerExternal.isLoggable(java.util.logging.Level.FINER))
             loggerExternal.entering(getClassNameLogging(), "setBigDecimal",
-                    new Object[] {paramterIndex, x, precision, scale});
+                    new Object[] {parameterIndex, x, precision, scale});
         checkClosed();
-        setValue(paramterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, precision, scale, false);
+        setValue(parameterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, precision, scale, false);
         loggerExternal.exiting(getClassNameLogging(), "setBigDecimal");
     }
 
     @Override
-    public final void setBigDecimal(int paramterIndex, BigDecimal x, int precision, int scale,
+    public final void setBigDecimal(int parameterIndex, BigDecimal x, int precision, int scale,
             boolean forceEncrypt) throws SQLServerException {
         if (loggerExternal.isLoggable(java.util.logging.Level.FINER))
             loggerExternal.entering(getClassNameLogging(), "setBigDecimal",
-                    new Object[] {paramterIndex, x, precision, scale, forceEncrypt});
+                    new Object[] {parameterIndex, x, precision, scale, forceEncrypt});
         checkClosed();
-        setValue(paramterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, precision, scale, forceEncrypt);
+        setValue(parameterIndex, JDBCType.DECIMAL, x, JavaType.BIGDECIMAL, precision, scale, forceEncrypt);
         loggerExternal.exiting(getClassNameLogging(), "setBigDecimal");
     }
 
@@ -1970,8 +1970,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                 try (SQLServerStatement stmt = (SQLServerStatement) connection.createStatement(
                         ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, connection.getHoldability(),
                         stmtColumnEncriptionSetting);
-                        SQLServerResultSet rs = stmt.executeQueryInternal(
-                                "sp_executesql N'SET FMTONLY ON SELECT * FROM " + tableName + " '");) {
+                        SQLServerResultSet rs = stmt
+                                .executeQueryInternal("sp_executesql N'SET FMTONLY ON SELECT * FROM "
+                                        + Util.escapeSingleQuotes(tableName) + " '");) {
                     if (null != columnList && columnList.size() > 0) {
                         if (columnList.size() != valueList.size()) {
                             throw new IllegalArgumentException(
@@ -2002,6 +2003,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                     }
 
                     SQLServerBulkCopy bcOperation = new SQLServerBulkCopy(connection);
+                    SQLServerBulkCopyOptions option = new SQLServerBulkCopyOptions();
+                    option.setBulkCopyTimeout(queryTimeout);
+                    bcOperation.setBulkCopyOptions(option);
                     bcOperation.setDestinationTableName(tableName);
                     bcOperation.setStmtColumnEncriptionSetting(this.getStmtColumnEncriptionSetting());
                     bcOperation.setDestinationTableMetadata(rs);
@@ -2123,8 +2127,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                 try (SQLServerStatement stmt = (SQLServerStatement) connection.createStatement(
                         ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, connection.getHoldability(),
                         stmtColumnEncriptionSetting);
-                        SQLServerResultSet rs = stmt.executeQueryInternal(
-                                "sp_executesql N'SET FMTONLY ON SELECT * FROM " + tableName + " '");) {
+                        SQLServerResultSet rs = stmt
+                                .executeQueryInternal("sp_executesql N'SET FMTONLY ON SELECT * FROM "
+                                        + Util.escapeSingleQuotes(tableName) + " '");) {
                     if (null != columnList && columnList.size() > 0) {
                         if (columnList.size() != valueList.size()) {
                             throw new IllegalArgumentException(
@@ -2155,6 +2160,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                     }
 
                     SQLServerBulkCopy bcOperation = new SQLServerBulkCopy(connection);
+                    SQLServerBulkCopyOptions option = new SQLServerBulkCopyOptions();
+                    option.setBulkCopyTimeout(queryTimeout);
+                    bcOperation.setBulkCopyOptions(option);
                     bcOperation.setDestinationTableName(tableName);
                     bcOperation.setStmtColumnEncriptionSetting(this.getStmtColumnEncriptionSetting());
                     bcOperation.setDestinationTableMetadata(rs);
@@ -2763,7 +2771,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                                 // Get the first result from the batch. If there is no result for this batch
                                 // then bail, leaving EXECUTE_FAILED in the current and remaining slots of
                                 // the update count array.
-                                if (!getNextResult())
+                                if (!getNextResult(true))
                                     return;
 
                                 // If the result is a ResultSet (rather than an update count) then throw an

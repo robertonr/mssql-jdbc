@@ -5,11 +5,9 @@
 
 package com.microsoft.sqlserver.jdbc;
 
-import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.nio.charset.StandardCharsets.UTF_16LE;
-
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,6 +18,8 @@ import java.io.Serializable;
 import java.io.StringReader;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.sql.Clob;
 import java.sql.SQLException;
 import java.text.MessageFormat;
@@ -152,7 +152,7 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
 
     // The value of the CLOB that this Clob object represents.
     // This value is never null unless/until the free() method is called.
-    private String value;
+    protected String value;
 
     private final SQLCollation sqlCollation;
 
@@ -181,8 +181,9 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
     // Unique id generator for each instance (used for logging).
     static private final AtomicInteger baseID = new AtomicInteger(0);
 
+    private Charset defaultCharset = null;
+    
     // Returns unique id for each instance.
-
     private static int nextInstanceID() {
         return baseID.incrementAndGet();
     }
@@ -281,9 +282,19 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
         if (null != sqlCollation && !sqlCollation.supportsAsciiConversion())
             DataTypes.throwConversionError(getDisplayClassName(), "AsciiStream");
 
-        getStringFromStream();
-        InputStream getterStream = new BufferedInputStream(
-                new ReaderInputStream(new StringReader(value), US_ASCII, value.length()));
+        // Need to use a BufferedInputStream since the stream returned by this method is assumed to support mark/reset
+        InputStream getterStream = null;
+        if (null == value && !activeStreams.isEmpty()) {
+            InputStream inputStream = (InputStream) activeStreams.get(0);
+            try {
+                inputStream.reset();
+            } catch (IOException e) {
+                SQLServerException.makeFromDriverError(con, null, e.getMessage(), null, false);
+            }
+            getterStream = new BufferedInputStream(inputStream);
+        } else {
+            getterStream = new ByteArrayInputStream(value.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        }
         activeStreams.add(getterStream);
         return getterStream;
     }
@@ -301,11 +312,17 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
         Reader getterStream = null;
         if (null == value && !activeStreams.isEmpty()) {
             InputStream inputStream = (InputStream) activeStreams.get(0);
-            getterStream = new BufferedReader(new InputStreamReader(inputStream, UTF_16LE));
+            try {
+                inputStream.reset();
+            } catch (IOException e) {
+                SQLServerException.makeFromDriverError(con, null, e.getMessage(), null, false);
+            }
+            Charset cs = (defaultCharset == null) ? typeInfo.getCharset() : defaultCharset;
+            getterStream = new BufferedReader(new InputStreamReader(inputStream, cs));
         } else {
             getterStream = new StringReader(value);
-            activeStreams.add(getterStream);
         }
+        activeStreams.add(getterStream);
         return getterStream;
     }
 
@@ -381,9 +398,8 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
      */
     public long length() throws SQLException {
         checkClosed();
-
-        if (value == null && activeStreams.get(0) instanceof PLPInputStream) {
-            return (long) ((PLPInputStream) activeStreams.get(0)).payloadLength / 2;
+        if (null == value && activeStreams.get(0) instanceof BaseInputStream) {
+            return (long) ((BaseInputStream) activeStreams.get(0)).payloadLength;
         }
         return value.length();
     }
@@ -410,9 +426,10 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
             try {
                 stream.reset();
             } catch (IOException e) {
-                throw new SQLServerException(e.getMessage(), null, 0, e);
+                SQLServerException.makeFromDriverError(con, null, e.getMessage(), null, false);
             }
-            value = new String((stream).getBytes(), typeInfo.getCharset());
+            Charset cs = (defaultCharset == null) ? typeInfo.getCharset() : defaultCharset;
+            value = new String(stream.getBytes(), cs);
         }
     }
 
@@ -572,7 +589,7 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
      * Writes len characters of str, starting at character offset, to the CLOB value that this Clob represents. The
      * string will overwrite the existing characters in the Clob object starting at the position pos. If the end of the
      * Clob value is reached while writing the given string, then the length of the Clob value will be increased to
-     * accomodate the extra characters.
+     * accommodate the extra characters.
      *
      * SQL Server behavior: If the value specified for pos is greater than then length+1 of the CLOB value then a
      * SQLException is thrown.
@@ -660,6 +677,10 @@ abstract class SQLServerClobBase extends SQLServerLob implements Serializable {
         }
 
         return len;
+    }
+    
+    protected void setDefaultCharset(Charset c) {
+        this.defaultCharset = c;
     }
 }
 
@@ -756,7 +777,7 @@ final class SQLServerClobAsciiOutputStream extends java.io.OutputStream {
             return;
         try {
             // Convert bytes to string using US-ASCII translation.
-            String s = new String(b, off, len, "US-ASCII");
+            String s = new String(b, off, len, StandardCharsets.US_ASCII);
 
             // Call parent's setString and update position.
             // setString can throw a SQLServerException, we translate
